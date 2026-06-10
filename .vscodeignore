@@ -1,0 +1,20 @@
+# Sources and dev tooling — only out/, media/, README, CHANGELOG, LICENSE ship
+src/**
+scripts/**
+sample/**
+.vscode/**
+.claude/**
+.remember/**
+.gitignore
+tsconfig.json
+out/test/**
+out/**/*.js.map
+**/.DS_Store
+
+# sql.js ships many build variants; the extension loads exactly these files
+node_modules/sql.js/**
+!node_modules/sql.js/package.json
+!node_modules/sql.js/LICENSE
+!node_modules/sql.js/dist/sql-wasm.js
+!node_modules/sql.js/dist/sql-wasm.wasm
+media/icon.svg

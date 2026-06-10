@@ -33,7 +33,7 @@ class SqliteDocument implements vscode.CustomDocument {
 export class SqliteEditorProvider
   implements vscode.CustomEditorProvider<SqliteDocument>
 {
-  static readonly viewType = 'sqliteViewer.view';
+  static readonly viewType = 'sqliteAtlas.view';
 
   private readonly changeEmitter =
     new vscode.EventEmitter<vscode.CustomDocumentEditEvent<SqliteDocument>>();

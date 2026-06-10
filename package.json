@@ -1,10 +1,23 @@
 {
-  "name": "sqlite-viewer-clone",
-  "displayName": "SQLite Viewer",
-  "description": "Quickly view SQLite database files in VS Code. An original-code clone of the SQLite Viewer extension.",
+  "name": "sqlite-atlas",
+  "displayName": "SQLite Atlas",
+  "description": "Browse and edit SQLite databases in VS Code: paginated tables, sorting, filtering, cell editing with undo/redo, row export, and large-file support.",
   "version": "0.1.0",
-  "publisher": "bryceharmon",
+  "publisher": "bryce-harmon",
   "license": "MIT",
+  "keywords": [
+    "sqlite",
+    "sqlite3",
+    "database",
+    "db",
+    "viewer",
+    "editor"
+  ],
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bharm16/sqlite-atlas.git"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -16,8 +29,8 @@
   "contributes": {
     "customEditors": [
       {
-        "viewType": "sqliteViewer.view",
-        "displayName": "SQLite Viewer",
+        "viewType": "sqliteAtlas.view",
+        "displayName": "SQLite Atlas",
         "priority": "default",
         "selector": [
           {

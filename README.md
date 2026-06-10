@@ -1,4 +1,4 @@
-# SQLite Viewer (clone)
+# SQLite Atlas
 
 A VS Code extension for quickly viewing SQLite database files, built from
 scratch as an original-code clone of the popular
