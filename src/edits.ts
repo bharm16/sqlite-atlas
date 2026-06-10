@@ -30,13 +30,44 @@ export interface DeleteOp {
 export type EditOp = UpdateOp | InsertOp | DeleteOp;
 
 /**
+ * Serialize edit ops for the hot-exit backup file. Uint8Array values (BLOB
+ * cells captured by delete ops) are encoded as tagged base64 objects since
+ * JSON has no binary type.
+ */
+export function serializeOps(ops: EditOp[]): string {
+  return JSON.stringify({ version: 1, ops }, (_key, value) =>
+    value instanceof Uint8Array
+      ? { __blob64: Buffer.from(value).toString('base64') }
+      : value
+  );
+}
+
+export function deserializeOps(json: string): EditOp[] {
+  const parsed = JSON.parse(json, (_key, value) =>
+    value && typeof value === 'object' && typeof value.__blob64 === 'string'
+      ? new Uint8Array(Buffer.from(value.__blob64, 'base64'))
+      : value
+  );
+  if (parsed.version !== 1 || !Array.isArray(parsed.ops)) {
+    throw new Error('Unrecognized backup format');
+  }
+  return parsed.ops as EditOp[];
+}
+
+/**
  * Applies structured edits to a database through a driver. Each edit carries
  * enough information to invert itself, which is what backs undo/redo.
  */
 export class EditSession {
   private inTxn = false;
+  /** Ops applied since the last save/revert, in order — the hot-exit backup. */
+  private pendingOps: EditOp[] = [];
 
   constructor(private readonly driver: SqliteDriver) {}
+
+  getPendingOps(): EditOp[] {
+    return [...this.pendingOps];
+  }
 
   /**
    * Commit pending edits. Returns the database image to write back to the
@@ -48,6 +79,7 @@ export class EditSession {
       this.driver.run('COMMIT');
       this.inTxn = false;
     }
+    this.pendingOps = [];
     return this.driver.serialize?.();
   }
 
@@ -56,6 +88,18 @@ export class EditSession {
     if (this.inTxn) {
       this.driver.run('ROLLBACK');
       this.inTxn = false;
+    }
+    this.pendingOps = [];
+  }
+
+  /**
+   * Re-apply ops restored from a hot-exit backup onto a freshly opened
+   * database. The ops become pending again, so the document is dirty and
+   * the next backup captures them too.
+   */
+  replay(ops: EditOp[]): void {
+    for (const op of ops) {
+      this.redo(op);
     }
   }
 
@@ -92,6 +136,7 @@ export class EditSession {
       `UPDATE ${quoteIdent(table)} SET ${quoteIdent(column)} = ? WHERE rowid = ?`,
       [newValue, rowid]
     );
+    this.pendingOps.push(op);
     return op;
   }
 
@@ -105,7 +150,15 @@ export class EditSession {
         ? `INSERT INTO ${quoteIdent(table)} DEFAULT VALUES`
         : `INSERT INTO ${quoteIdent(table)} (${colList}) VALUES (${placeholders})`;
     const { lastRowid } = this.driver.run(sql, columns.map((c) => values[c]));
-    return { kind: 'insert', table, rowid: lastRowid, columns, values: columns.map((c) => values[c]) };
+    const op: InsertOp = {
+      kind: 'insert',
+      table,
+      rowid: lastRowid,
+      columns,
+      values: columns.map((c) => values[c]),
+    };
+    this.pendingOps.push(op);
+    return op;
   }
 
   deleteRow(table: string, rowid: number): DeleteOp {
@@ -119,11 +172,17 @@ export class EditSession {
       throw new Error(`Row ${rowid} not found in ${table}`);
     }
     this.deleteByRowid(table, rowid);
-    return { kind: 'delete', table, rowid, columns, values: row as SqlValue[] };
+    const op: DeleteOp = { kind: 'delete', table, rowid, columns, values: row as SqlValue[] };
+    this.pendingOps.push(op);
+    return op;
   }
 
   undo(op: EditOp): void {
     this.ensureTxn();
+    // VS Code's undo stack is linear: the op being undone is the last applied.
+    if (this.pendingOps[this.pendingOps.length - 1] === op) {
+      this.pendingOps.pop();
+    }
     switch (op.kind) {
       case 'update':
         this.setCell(op.table, op.rowid, op.column, op.oldValue);
@@ -139,6 +198,7 @@ export class EditSession {
 
   redo(op: EditOp): void {
     this.ensureTxn();
+    this.pendingOps.push(op);
     switch (op.kind) {
       case 'update':
         this.setCell(op.table, op.rowid, op.column, op.newValue);

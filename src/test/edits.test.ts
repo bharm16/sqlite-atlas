@@ -1,8 +1,25 @@
 import { test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { SqliteDriver } from '../driver';
-import { EditSession } from '../edits';
+import { deserializeOps, EditOp, EditSession, serializeOps } from '../edits';
 import { buildSampleBytes, driverFactories } from './helpers';
+
+test('edit ops survive a serialization round-trip, including BLOBs', () => {
+  const ops: EditOp[] = [
+    { kind: 'update', table: 'albums', rowid: 1, column: 'title', oldValue: 'Old', newValue: 'New' },
+    {
+      kind: 'delete',
+      table: 'albums',
+      rowid: 2,
+      columns: ['id', 'title', 'cover'],
+      values: [2, null, new Uint8Array([0xde, 0xad, 0xbe, 0xef])],
+    },
+  ];
+  const restored = deserializeOps(serializeOps(ops));
+  assert.deepEqual(restored, ops);
+  const blob = (restored[1] as Extract<EditOp, { kind: 'delete' }>).values[2];
+  assert.ok(blob instanceof Uint8Array, 'BLOB round-trips as Uint8Array');
+});
 
 function titleOfRow(db: SqliteDriver, rowid: number): unknown {
   const data = db.getTableData({ table: 'albums', page: 0, pageSize: 100 });
@@ -90,6 +107,43 @@ for (const { name, open } of driverFactories) {
       session.revert();
       const after = db.getTableData({ table: 'artists', page: 0, pageSize: 100 });
       assert.equal(after.rows[after.rowIds!.indexOf(1)][1], 'Nina S.');
+    });
+
+    await t.test('tracks pending ops for hot-exit backup until save or revert', () => {
+      assert.equal(session.getPendingOps().length, 0, 'clean after previous save/revert');
+      const op1 = session.updateCell('artists', 1, 'name', 'Nina Backup');
+      const op2 = session.insertRow('artists', { name: 'Backup Artist' });
+      assert.equal(session.getPendingOps().length, 2);
+      session.undo(op2);
+      assert.equal(session.getPendingOps().length, 1);
+      session.redo(op2);
+      assert.deepEqual(session.getPendingOps(), [op1, op2]);
+      session.revert();
+      assert.equal(session.getPendingOps().length, 0);
+    });
+
+    await t.test('pending ops replay onto a fresh connection (hot-exit restore)', async () => {
+      const bytes = await buildSampleBytes();
+      const crashed = await open(bytes);
+      const s1 = new EditSession(crashed);
+      s1.updateCell('artists', 1, 'name', 'Recovered Nina');
+      s1.deleteRow('albums', 2);
+      const backup = serializeOps(s1.getPendingOps());
+      crashed.close(); // window dies — nothing was committed
+
+      const fresh = await open(bytes);
+      const s2 = new EditSession(fresh);
+      s2.replay(deserializeOps(backup));
+      const artists = fresh.getTableData({ table: 'artists', page: 0, pageSize: 100 });
+      assert.equal(artists.rows[artists.rowIds!.indexOf(1)][1], 'Recovered Nina');
+      assert.equal(
+        fresh.getTableData({ table: 'albums', page: 0, pageSize: 100 }).totalRows,
+        2
+      );
+      // The restored document is dirty again: the replayed ops are pending,
+      // so the next hot exit can back them up too.
+      assert.equal(s2.getPendingOps().length, 2);
+      fresh.close();
     });
 
     db.close();

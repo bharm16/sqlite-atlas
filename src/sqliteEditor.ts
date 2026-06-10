@@ -3,7 +3,13 @@ import * as vscode from 'vscode';
 import { SqliteDriver, TableDataRequest } from './driver';
 import { NodeSqliteDriver } from './drivers/nodeSqlite';
 import { SqlJsDriver } from './drivers/sqljs';
-import { EditOp, EditSession, SqlValue } from './edits';
+import {
+  deserializeOps,
+  EditOp,
+  EditSession,
+  serializeOps,
+  SqlValue,
+} from './edits';
 import { ExportFormat, formatRows } from './export';
 
 class SqliteDocument implements vscode.CustomDocument {
@@ -37,15 +43,30 @@ export class SqliteEditorProvider
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
-  async openCustomDocument(uri: vscode.Uri): Promise<SqliteDocument> {
+  async openCustomDocument(
+    uri: vscode.Uri,
+    openContext: vscode.CustomDocumentOpenContext
+  ): Promise<SqliteDocument> {
     // Prefer the disk-backed driver: it never loads the file into memory,
     // so large databases open instantly. Fall back to sql.js (in-memory)
     // when node:sqlite is missing or the file isn't on local disk.
+    let document: SqliteDocument;
     if (uri.scheme === 'file' && NodeSqliteDriver.isAvailable()) {
-      return new SqliteDocument(uri, NodeSqliteDriver.open(uri.fsPath), true);
+      document = new SqliteDocument(uri, NodeSqliteDriver.open(uri.fsPath), true);
+    } else {
+      const bytes = await vscode.workspace.fs.readFile(uri);
+      document = new SqliteDocument(uri, await SqlJsDriver.open(bytes), false);
     }
-    const bytes = await vscode.workspace.fs.readFile(uri);
-    return new SqliteDocument(uri, await SqlJsDriver.open(bytes), false);
+
+    // Hot-exit restore: the backup is the log of unsaved edit ops; replay
+    // them so the document reopens dirty with the edits in place.
+    if (openContext.backupId) {
+      const json = Buffer.from(
+        await vscode.workspace.fs.readFile(vscode.Uri.parse(openContext.backupId))
+      ).toString('utf8');
+      document.session.replay(deserializeOps(json));
+    }
+    return document;
   }
 
   async resolveCustomEditor(
@@ -213,13 +234,14 @@ export class SqliteEditorProvider
     document: SqliteDocument,
     context: vscode.CustomDocumentBackupContext
   ): Promise<vscode.CustomDocumentBackup> {
-    const bytes = document.db.serialize?.();
-    if (!bytes) {
-      // Disk-backed documents keep uncommitted state in the SQLite journal;
-      // there is no portable image to back up. Edits survive only via save.
-      throw new Error('Backup is not supported for disk-backed databases');
-    }
-    await vscode.workspace.fs.writeFile(context.destination, bytes);
+    // Back up the log of unsaved edit ops, not a database image: an image
+    // taken mid-transaction would miss the uncommitted edits on both
+    // drivers (SQLite keeps dirty pages in the pager cache until COMMIT).
+    const json = serializeOps(document.session.getPendingOps());
+    await vscode.workspace.fs.writeFile(
+      context.destination,
+      Buffer.from(json, 'utf8')
+    );
     return {
       id: context.destination.toString(),
       delete: async () => {
