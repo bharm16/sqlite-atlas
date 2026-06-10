@@ -15,6 +15,11 @@
     filter: '',
     totalRows: 0,
     showingSchema: false,
+    // Last received page of data, used for editing and copying.
+    columns: [],
+    rows: [],
+    rowIds: null,
+    selectedRow: -1,
   };
 
   const el = {
@@ -22,11 +27,19 @@
     tableList: document.getElementById('table-list'),
     schemaBtn: document.getElementById('schema-btn'),
     search: document.getElementById('search'),
+    addRow: document.getElementById('add-row'),
+    deleteRow: document.getElementById('delete-row'),
+    copyFormat: document.getElementById('copy-format'),
     prev: document.getElementById('prev'),
     next: document.getElementById('next'),
     pageInfo: document.getElementById('page-info'),
     grid: document.getElementById('grid-container'),
     statusBar: document.getElementById('status-bar'),
+    insertOverlay: document.getElementById('insert-overlay'),
+    insertTitle: document.getElementById('insert-title'),
+    insertFields: document.getElementById('insert-fields'),
+    insertOk: document.getElementById('insert-ok'),
+    insertCancel: document.getElementById('insert-cancel'),
   };
 
   // ---- Messaging ----
@@ -49,16 +62,30 @@
       case 'tableData':
         if (msg.table === state.currentTable && !state.showingSchema) {
           state.totalRows = msg.data.totalRows;
+          state.columns = msg.data.columns;
+          state.rows = msg.data.rows;
+          state.rowIds = msg.data.rowIds || null;
+          state.selectedRow = -1;
           renderGrid(msg.data);
           renderPager();
+          updateEditButtons();
+        }
+        break;
+      case 'dataChanged':
+        // An edit, undo, redo, or revert happened (possibly in another
+        // panel). Update sidebar counts and re-query what we display.
+        state.tables = msg.tables;
+        renderTableList();
+        markActiveTable();
+        if (state.currentTable && !state.showingSchema) {
+          requestData();
         }
         break;
       case 'schema':
         renderSchema(msg.entries);
         break;
       case 'error':
-        el.grid.textContent = '';
-        el.grid.appendChild(div('error', 'Error: ' + msg.message));
+        setStatus('Error: ' + msg.message, true);
         break;
     }
   });
@@ -105,15 +132,22 @@
     }
   }
 
+  function markActiveTable() {
+    for (const li of el.tableList.children) {
+      li.classList.toggle(
+        'active',
+        !state.showingSchema && li.dataset.name === state.currentTable
+      );
+    }
+  }
+
   function selectTable(name) {
     state.currentTable = name;
     state.page = 0;
     state.sortColumn = null;
     state.sortDir = 'asc';
     state.showingSchema = false;
-    for (const li of el.tableList.children) {
-      li.classList.toggle('active', li.dataset.name === name);
-    }
+    markActiveTable();
     requestData();
   }
 
@@ -122,7 +156,9 @@
   function renderGrid(data) {
     el.grid.textContent = '';
     if (data.rows.length === 0) {
-      el.grid.appendChild(div('empty', state.filter ? 'No rows match the filter.' : 'Table is empty.'));
+      el.grid.appendChild(
+        div('empty', state.filter ? 'No rows match the filter.' : 'Table is empty.')
+      );
       updateStatus();
       return;
     }
@@ -149,24 +185,46 @@
     table.appendChild(thead);
 
     const tbody = document.createElement('tbody');
-    for (const row of data.rows) {
+    data.rows.forEach((row, rowIndex) => {
       const tr = document.createElement('tr');
-      for (const value of row) {
+      row.forEach((value, colIndex) => {
         const td = document.createElement('td');
-        if (value === null) {
-          td.className = 'null';
-          td.textContent = 'NULL';
-        } else {
-          td.textContent = String(value);
-          td.title = String(value);
+        renderCell(td, value);
+        td.addEventListener('click', () => selectRow(rowIndex));
+        if (state.rowIds) {
+          td.addEventListener('dblclick', () =>
+            beginCellEdit(td, rowIndex, colIndex)
+          );
         }
         tr.appendChild(td);
-      }
+      });
       tbody.appendChild(tr);
-    }
+    });
     table.appendChild(tbody);
     el.grid.appendChild(table);
     updateStatus();
+  }
+
+  function renderCell(td, value) {
+    if (value === null) {
+      td.className = 'null';
+      td.textContent = 'NULL';
+    } else {
+      td.className = '';
+      td.textContent = String(value);
+      td.title = String(value);
+    }
+  }
+
+  function selectRow(rowIndex) {
+    state.selectedRow = rowIndex;
+    const tbody = el.grid.querySelector('tbody');
+    if (tbody) {
+      Array.from(tbody.children).forEach((tr, i) => {
+        tr.classList.toggle('selected', i === rowIndex);
+      });
+    }
+    updateEditButtons();
   }
 
   function sortBy(column) {
@@ -180,13 +238,157 @@
     requestData();
   }
 
+  // ---- Cell editing ----
+
+  function beginCellEdit(td, rowIndex, colIndex) {
+    if (td.querySelector('input')) {
+      return;
+    }
+    const original = state.rows[rowIndex][colIndex];
+    const input = document.createElement('input');
+    input.className = 'cell-editor';
+    input.value = original === null ? '' : String(original);
+    input.title = 'Enter commits, Esc cancels. Type NULL for NULL.';
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    let finished = false;
+    const finish = (commit) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      if (commit && input.value !== (original === null ? '' : String(original))) {
+        vscode.postMessage({
+          type: 'updateCell',
+          table: state.currentTable,
+          rowid: state.rowIds[rowIndex],
+          column: state.columns[colIndex].name,
+          value: parseEntry(input.value),
+        });
+        // The grid refreshes via dataChanged; show the value optimistically.
+        renderCell(td, parseEntry(input.value));
+      } else {
+        renderCell(td, original);
+      }
+    };
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        finish(true);
+      } else if (e.key === 'Escape') {
+        finish(false);
+      }
+    });
+    input.addEventListener('blur', () => finish(true));
+  }
+
+  /** Interpret what the user typed: the literal NULL means SQL NULL. */
+  function parseEntry(text) {
+    return text.toUpperCase() === 'NULL' ? null : text;
+  }
+
+  // ---- Insert / delete rows ----
+
+  el.addRow.addEventListener('click', () => {
+    if (!state.rowIds && state.rows.length > 0) {
+      return;
+    }
+    el.insertTitle.textContent = 'Insert into ' + state.currentTable;
+    el.insertFields.textContent = '';
+    for (const col of state.columns) {
+      const label = document.createElement('label');
+      const caption = document.createElement('span');
+      caption.textContent = col.name + (col.type ? ' (' + col.type + ')' : '');
+      const input = document.createElement('input');
+      input.dataset.column = col.name;
+      input.placeholder = 'leave blank for default / NULL';
+      label.appendChild(caption);
+      label.appendChild(input);
+      el.insertFields.appendChild(label);
+    }
+    el.insertOverlay.classList.remove('hidden');
+    const first = el.insertFields.querySelector('input');
+    if (first) {
+      first.focus();
+    }
+  });
+
+  el.insertCancel.addEventListener('click', closeInsertForm);
+
+  el.insertOk.addEventListener('click', () => {
+    const values = {};
+    for (const input of el.insertFields.querySelectorAll('input')) {
+      if (input.value !== '') {
+        values[input.dataset.column] = parseEntry(input.value);
+      }
+    }
+    vscode.postMessage({ type: 'insertRow', table: state.currentTable, values });
+    closeInsertForm();
+  });
+
+  el.insertOverlay.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeInsertForm();
+    } else if (e.key === 'Enter') {
+      el.insertOk.click();
+    }
+  });
+
+  function closeInsertForm() {
+    el.insertOverlay.classList.add('hidden');
+  }
+
+  el.deleteRow.addEventListener('click', () => {
+    if (state.selectedRow === -1 || !state.rowIds) {
+      return;
+    }
+    vscode.postMessage({
+      type: 'deleteRow',
+      table: state.currentTable,
+      rowid: state.rowIds[state.selectedRow],
+    });
+  });
+
+  function updateEditButtons() {
+    const editable = !state.showingSchema && !!state.rowIds;
+    const editableTable =
+      !state.showingSchema &&
+      state.tables.some(
+        (t) => t.name === state.currentTable && t.type === 'table'
+      );
+    el.addRow.disabled = !editableTable;
+    el.deleteRow.disabled = !editable || state.selectedRow === -1;
+  }
+
+  // ---- Copy / export ----
+
+  el.copyFormat.addEventListener('change', () => {
+    const format = el.copyFormat.value;
+    el.copyFormat.value = '';
+    if (!format || state.showingSchema || state.rows.length === 0) {
+      return;
+    }
+    // Copy the selected row if there is one, otherwise the visible page.
+    const rows =
+      state.selectedRow === -1 ? state.rows : [state.rows[state.selectedRow]];
+    vscode.postMessage({
+      type: 'copyRows',
+      format,
+      table: state.currentTable,
+      columns: state.columns.map((c) => c.name),
+      rows,
+    });
+  });
+
   // ---- Schema ----
 
   el.schemaBtn.addEventListener('click', () => {
     state.showingSchema = true;
-    for (const li of el.tableList.children) {
-      li.classList.remove('active');
-    }
+    markActiveTable();
+    updateEditButtons();
     vscode.postMessage({ type: 'getSchema' });
   });
 
@@ -199,7 +401,7 @@
     el.pageInfo.textContent = '';
     el.prev.disabled = true;
     el.next.disabled = true;
-    el.statusBar.textContent = entries.length + ' schema objects';
+    setStatus(entries.length + ' schema objects');
   }
 
   // ---- Paging, filtering, status ----
@@ -240,9 +442,16 @@
   function updateStatus() {
     const first = state.totalRows === 0 ? 0 : state.page * PAGE_SIZE + 1;
     const last = Math.min((state.page + 1) * PAGE_SIZE, state.totalRows);
-    el.statusBar.textContent =
+    setStatus(
       state.currentTable + ': rows ' + first + '–' + last + ' of ' + state.totalRows +
-      (state.filter ? ' (filtered)' : '');
+        (state.filter ? ' (filtered)' : '') +
+        (state.rowIds ? '' : ' (read-only)')
+    );
+  }
+
+  function setStatus(text, isError) {
+    el.statusBar.textContent = text;
+    el.statusBar.classList.toggle('status-error', !!isError);
   }
 
   function div(className, text) {

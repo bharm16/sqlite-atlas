@@ -8,6 +8,7 @@ export function activate(context: vscode.ExtensionContext): void {
       new SqliteEditorProvider(context),
       {
         webviewOptions: { retainContextWhenHidden: true },
+        // Edits broadcast to every panel showing the same document.
         supportsMultipleEditorsPerDocument: true,
       }
     )
