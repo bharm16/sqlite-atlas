@@ -20,12 +20,24 @@
         "displayName": "SQLite Viewer",
         "priority": "default",
         "selector": [
-          { "filenamePattern": "*.sqlite" },
-          { "filenamePattern": "*.sqlite3" },
-          { "filenamePattern": "*.db" },
-          { "filenamePattern": "*.db3" },
-          { "filenamePattern": "*.s3db" },
-          { "filenamePattern": "*.sdb" }
+          {
+            "filenamePattern": "*.sqlite"
+          },
+          {
+            "filenamePattern": "*.sqlite3"
+          },
+          {
+            "filenamePattern": "*.db"
+          },
+          {
+            "filenamePattern": "*.db3"
+          },
+          {
+            "filenamePattern": "*.s3db"
+          },
+          {
+            "filenamePattern": "*.sdb"
+          }
         ]
       }
     ]
@@ -40,7 +52,7 @@
     "sql.js": "^1.10.3"
   },
   "devDependencies": {
-    "@types/node": "^20.11.0",
+    "@types/node": "^22.19.20",
     "@types/sql.js": "^1.4.9",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.4.0"

@@ -1,6 +1,9 @@
 import initSqlJs from 'sql.js';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { SqliteDriver } from '../driver';
+import { NodeSqliteDriver } from '../drivers/nodeSqlite';
 import { SqlJsDriver } from '../drivers/sqljs';
 
 export async function buildSampleBytes(): Promise<Uint8Array> {
@@ -38,9 +41,22 @@ export interface DriverFactory {
   open(bytes: Uint8Array): Promise<SqliteDriver>;
 }
 
+let tmpCounter = 0;
+
+/** Write a database image to a fresh temp file and return its path. */
+export function writeTempDb(bytes: Uint8Array): string {
+  const file = path.join(os.tmpdir(), `sqlv-test-${process.pid}-${tmpCounter++}.db`);
+  fs.writeFileSync(file, bytes);
+  return file;
+}
+
 export const driverFactories: DriverFactory[] = [
   {
     name: 'sqljs',
     open: (bytes) => SqlJsDriver.open(bytes),
+  },
+  {
+    name: 'node-sqlite',
+    open: async (bytes) => NodeSqliteDriver.open(writeTempDb(bytes)),
   },
 ];
