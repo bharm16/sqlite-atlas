@@ -1,37 +1,15 @@
 import * as path from 'path';
 import initSqlJs, { Database as SqlJsDatabase, SqlJsStatic } from 'sql.js';
-
-export interface TableInfo {
-  name: string;
-  type: 'table' | 'view';
-  rowCount: number;
-}
-
-export interface ColumnInfo {
-  name: string;
-  type: string;
-  pk: boolean;
-}
-
-export interface TableDataRequest {
-  table: string;
-  page: number;
-  pageSize: number;
-  sortColumn?: string;
-  sortDir?: 'asc' | 'desc';
-  filter?: string;
-}
-
-export interface TableData {
-  columns: ColumnInfo[];
-  rows: unknown[][];
-  totalRows: number;
-}
-
-export interface SchemaEntry {
-  name: string;
-  sql: string;
-}
+import {
+  ColumnInfo,
+  SchemaEntry,
+  SqliteDriver,
+  TableData,
+  TableDataRequest,
+  TableInfo,
+  quoteIdent,
+  toDisplayValue,
+} from '../driver';
 
 let sqlJsPromise: Promise<SqlJsStatic> | undefined;
 
@@ -46,20 +24,16 @@ function getSqlJs(): Promise<SqlJsStatic> {
   return sqlJsPromise;
 }
 
-/** Quote an identifier for safe interpolation into SQL. */
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
-}
-
 /**
- * Read-only wrapper around a sql.js database opened from a byte buffer.
+ * In-memory driver backed by sql.js (SQLite compiled to WebAssembly).
+ * Loads the whole file into memory; works on any platform.
  */
-export class SqliteDb {
+export class SqlJsDriver implements SqliteDriver {
   private constructor(private readonly db: SqlJsDatabase) {}
 
-  static async open(bytes: Uint8Array): Promise<SqliteDb> {
+  static async open(bytes: Uint8Array): Promise<SqlJsDriver> {
     const SQL = await getSqlJs();
-    return new SqliteDb(new SQL.Database(bytes));
+    return new SqlJsDriver(new SQL.Database(bytes));
   }
 
   listTables(): TableInfo[] {
@@ -166,12 +140,4 @@ export class SqliteDb {
       stmt.free();
     }
   }
-}
-
-/** Convert sql.js cell values into something safe to postMessage and render. */
-function toDisplayValue(value: unknown): unknown {
-  if (value instanceof Uint8Array) {
-    return `BLOB (${value.byteLength} bytes)`;
-  }
-  return value;
 }

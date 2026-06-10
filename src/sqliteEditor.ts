@@ -1,11 +1,12 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { SqliteDb, TableDataRequest } from './database';
+import { SqliteDriver, TableDataRequest } from './driver';
+import { SqlJsDriver } from './drivers/sqljs';
 
 class SqliteDocument implements vscode.CustomDocument {
   constructor(
     readonly uri: vscode.Uri,
-    readonly db: SqliteDb
+    readonly db: SqliteDriver
   ) {}
 
   dispose(): void {
@@ -22,7 +23,7 @@ export class SqliteEditorProvider
 
   async openCustomDocument(uri: vscode.Uri): Promise<SqliteDocument> {
     const bytes = await vscode.workspace.fs.readFile(uri);
-    const db = await SqliteDb.open(bytes);
+    const db = await SqlJsDriver.open(bytes);
     return new SqliteDocument(uri, db);
   }
 

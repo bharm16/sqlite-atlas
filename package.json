@@ -33,7 +33,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node out/test/database.test.js",
+    "test": "npm run compile && node --test 'out/test/*.test.js'",
     "sample": "node scripts/make-sample-db.js"
   },
   "dependencies": {
