@@ -1,0 +1,211 @@
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+}
+
+#app {
+  display: flex;
+  height: 100vh;
+}
+
+/* ---- Sidebar ---- */
+#sidebar {
+  width: 220px;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-sideBar-background, transparent);
+}
+
+#file-name {
+  padding: 8px 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+
+#table-list {
+  flex: 1;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+#table-list li {
+  padding: 4px 12px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+#table-list li:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+
+#table-list li.active {
+  background: var(--vscode-list-activeSelectionBackground);
+  color: var(--vscode-list-activeSelectionForeground);
+}
+
+#table-list .row-count {
+  opacity: 0.6;
+  font-size: 0.85em;
+}
+
+#table-list .view-tag {
+  opacity: 0.6;
+  font-style: italic;
+  font-size: 0.85em;
+}
+
+#schema-btn {
+  margin: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border: none;
+  border-radius: 2px;
+}
+
+#schema-btn:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+/* ---- Main content ---- */
+#content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border, #444);
+}
+
+#search {
+  flex: 1;
+  max-width: 360px;
+  padding: 3px 6px;
+  color: var(--vscode-input-foreground);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, transparent);
+  border-radius: 2px;
+  outline: none;
+}
+
+#search:focus {
+  border-color: var(--vscode-focusBorder);
+}
+
+#pager {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+#pager button {
+  padding: 2px 8px;
+  cursor: pointer;
+  color: var(--vscode-button-secondaryForeground, var(--vscode-foreground));
+  background: var(--vscode-button-secondaryBackground, transparent);
+  border: 1px solid var(--vscode-panel-border, #444);
+  border-radius: 2px;
+}
+
+#pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- Data grid ---- */
+#grid-container {
+  flex: 1;
+  overflow: auto;
+}
+
+table.grid {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+}
+
+table.grid th,
+table.grid td {
+  padding: 3px 10px;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  border-bottom: 1px solid var(--vscode-panel-border, #333);
+}
+
+table.grid th {
+  position: sticky;
+  top: 0;
+  cursor: pointer;
+  user-select: none;
+  background: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-editor-background));
+  border-bottom: 1px solid var(--vscode-panel-border, #555);
+}
+
+table.grid th .col-type {
+  opacity: 0.55;
+  font-weight: normal;
+  font-size: 0.85em;
+  margin-left: 4px;
+}
+
+table.grid tr:hover td {
+  background: var(--vscode-list-hoverBackground);
+}
+
+td.null {
+  opacity: 0.45;
+  font-style: italic;
+}
+
+/* ---- Schema view ---- */
+pre.schema {
+  margin: 0;
+  padding: 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 13px);
+  white-space: pre-wrap;
+}
+
+/* ---- Status bar ---- */
+#status-bar {
+  padding: 4px 10px;
+  font-size: 0.9em;
+  opacity: 0.8;
+  border-top: 1px solid var(--vscode-panel-border, #444);
+}
+
+.error {
+  color: var(--vscode-errorForeground, #f48771);
+  padding: 12px;
+}
+
+.empty {
+  opacity: 0.6;
+  padding: 16px;
+}

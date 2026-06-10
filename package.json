@@ -1,0 +1,48 @@
+{
+  "name": "sqlite-viewer-clone",
+  "displayName": "SQLite Viewer",
+  "description": "Quickly view SQLite database files in VS Code. An original-code clone of the SQLite Viewer extension.",
+  "version": "0.1.0",
+  "publisher": "bryceharmon",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "sqliteViewer.view",
+        "displayName": "SQLite Viewer",
+        "priority": "default",
+        "selector": [
+          { "filenamePattern": "*.sqlite" },
+          { "filenamePattern": "*.sqlite3" },
+          { "filenamePattern": "*.db" },
+          { "filenamePattern": "*.db3" },
+          { "filenamePattern": "*.s3db" },
+          { "filenamePattern": "*.sdb" }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "test": "npm run compile && node out/test/database.test.js",
+    "sample": "node scripts/make-sample-db.js"
+  },
+  "dependencies": {
+    "sql.js": "^1.10.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/sql.js": "^1.4.9",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
