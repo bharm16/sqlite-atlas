@@ -2,6 +2,7 @@ import * as path from 'path';
 import initSqlJs, { Database as SqlJsDatabase, SqlJsStatic } from 'sql.js';
 import {
   ColumnInfo,
+  RunResult,
   SchemaEntry,
   SqliteDriver,
   TableData,
@@ -87,21 +88,17 @@ export class SqlJsDriver implements SqliteDriver {
 
     const base = `FROM ${quoteIdent(req.table)}${where}`;
     const totalRows = this.scalar(`SELECT COUNT(*) ${base}`, params);
+    const tail = `${base}${orderBy} LIMIT ? OFFSET ?`;
+    const bindings = [...params, req.pageSize, req.page * req.pageSize];
 
-    const rows: unknown[][] = [];
-    const stmt = this.db.prepare(
-      `SELECT * ${base}${orderBy} LIMIT ? OFFSET ?`
-    );
+    // Views and WITHOUT ROWID tables have no rowid; fall back to plain rows.
     try {
-      stmt.bind([...params, req.pageSize, req.page * req.pageSize]);
-      while (stmt.step()) {
-        rows.push(stmt.get().map(toDisplayValue));
-      }
-    } finally {
-      stmt.free();
+      const { rows, rowIds } = this.fetchRows(`SELECT rowid AS __rid_, * ${tail}`, bindings, true);
+      return { columns, rows, totalRows, rowIds };
+    } catch {
+      const { rows } = this.fetchRows(`SELECT * ${tail}`, bindings, false);
+      return { columns, rows, totalRows };
     }
-
-    return { columns, rows, totalRows };
   }
 
   getSchema(): SchemaEntry[] {
@@ -117,8 +114,54 @@ export class SqlJsDriver implements SqliteDriver {
     }));
   }
 
+  run(sql: string, params: unknown[] = []): RunResult {
+    this.db.run(sql, params as never[]);
+    const changes = this.db.getRowsModified();
+    const lastRowid = this.scalar('SELECT last_insert_rowid()', []);
+    return { changes, lastRowid };
+  }
+
+  queryRow(sql: string, params: unknown[] = []): unknown[] | undefined {
+    const stmt = this.db.prepare(sql);
+    try {
+      stmt.bind(params as never[]);
+      return stmt.step() ? stmt.get() : undefined;
+    } finally {
+      stmt.free();
+    }
+  }
+
+  serialize(): Uint8Array {
+    return this.db.export();
+  }
+
   close(): void {
     this.db.close();
+  }
+
+  private fetchRows(
+    sql: string,
+    bindings: unknown[],
+    withRowIds: boolean
+  ): { rows: unknown[][]; rowIds?: number[] } {
+    const rows: unknown[][] = [];
+    const rowIds: number[] = [];
+    const stmt = this.db.prepare(sql);
+    try {
+      stmt.bind(bindings as never[]);
+      while (stmt.step()) {
+        const values = stmt.get();
+        if (withRowIds) {
+          rowIds.push(Number(values[0]));
+          rows.push(values.slice(1).map(toDisplayValue));
+        } else {
+          rows.push(values.map(toDisplayValue));
+        }
+      }
+    } finally {
+      stmt.free();
+    }
+    return withRowIds ? { rows, rowIds } : { rows };
   }
 
   private countRows(table: string): number {

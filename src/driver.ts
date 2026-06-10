@@ -23,6 +23,8 @@ export interface TableData {
   columns: ColumnInfo[];
   rows: unknown[][];
   totalRows: number;
+  /** rowid per row, present only for editable (ordinary rowid) tables. */
+  rowIds?: number[];
 }
 
 export interface SchemaEntry {
@@ -34,11 +36,25 @@ export interface SchemaEntry {
  * A connection to a SQLite database. Implementations: sql.js (in-memory,
  * works everywhere) and node:sqlite (disk-backed, handles large files).
  */
+export interface RunResult {
+  changes: number;
+  lastRowid: number;
+}
+
 export interface SqliteDriver {
   listTables(): TableInfo[];
   getColumns(table: string): ColumnInfo[];
   getTableData(req: TableDataRequest): TableData;
   getSchema(): SchemaEntry[];
+  /** Execute a mutating or transaction-control statement. */
+  run(sql: string, params?: unknown[]): RunResult;
+  /** Fetch a single row of raw values, or undefined if no row matches. */
+  queryRow(sql: string, params?: unknown[]): unknown[] | undefined;
+  /**
+   * Return the database file image, for drivers that hold it in memory.
+   * Disk-backed drivers omit this; their COMMIT already persisted.
+   */
+  serialize?(): Uint8Array;
   close(): void;
 }
 
