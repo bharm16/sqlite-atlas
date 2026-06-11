@@ -77,5 +77,12 @@
     "mocha": "^11.7.6",
     "typescript": "^5.4.0"
   },
-  "pricing": "Free"
+  "pricing": "Free",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "SQLite Atlas only parses database file bytes; it never executes code from the workspace."
+    },
+    "virtualWorkspaces": true
+  }
 }
