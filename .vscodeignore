@@ -2,11 +2,15 @@
 src/**
 scripts/**
 sample/**
+docs/**
+CONTEXT.md
 .vscode/**
 .claude/**
 .remember/**
 .gitignore
 tsconfig.json
+media/tsconfig.json
+media/webview.d.ts
 out/test/**
 out/**/*.js.map
 **/.DS_Store
@@ -18,3 +22,6 @@ node_modules/sql.js/**
 !node_modules/sql.js/dist/sql-wasm.js
 !node_modules/sql.js/dist/sql-wasm.wasm
 media/icon.svg
+.vscode-test/**
+.vscode-test.mjs
+out/itest/**
