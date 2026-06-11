@@ -1,0 +1,16 @@
+{
+  // Type-checks the webview script against src/protocol.ts (no emit).
+  // Not strict: main.js predates checking; the goal is protocol safety.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "skipLibCheck": true
+  },
+  "include": ["main.js", "viewModel.js", "webview.d.ts"]
+}

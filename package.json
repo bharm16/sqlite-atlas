@@ -58,7 +58,8 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "test": "npm run compile && node --test 'out/test/*.test.js'",
+    "check:webview": "tsc -p media",
+    "test": "npm run compile && npm run check:webview && node --test 'out/test/*.test.js'",
     "sample": "node scripts/make-sample-db.js"
   },
   "dependencies": {

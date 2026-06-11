@@ -1,37 +1,40 @@
 // Webview front-end for the SQLite viewer custom editor.
-// Communicates with the extension host exclusively via postMessage.
+// Communicates with the extension host exclusively via postMessage;
+// the message types are defined once in src/protocol.ts and enforced
+// here by media/tsconfig.json (checkJs). All UI decisions live in the
+// view-model (viewModel.js, loaded first); this file only renders the
+// DOM and forwards events.
 (function () {
   'use strict';
 
-  const vscode = acquireVsCodeApi();
-  const PAGE_SIZE = 100;
+  /** @typedef {import('../src/protocol').WebviewToHost} WebviewToHost */
+  /** @typedef {import('../src/protocol').HostToWebview} HostToWebview */
 
-  const state = {
-    tables: [],
-    currentTable: null,
-    page: 0,
-    sortColumn: null,
-    sortDir: 'asc',
-    filter: '',
-    totalRows: 0,
-    showingSchema: false,
-    // Last received page of data, used for editing and copying.
-    columns: [],
-    rows: [],
-    rowIds: null,
-    selectedRow: -1,
-  };
+  const vscode = acquireVsCodeApi();
+  const { ViewModel } = /** @type {typeof import('./viewModel')} */ (
+    SqliteViewModel
+  );
+  const vm = new ViewModel();
+
+  /**
+   * Post a message to the extension host. Every outgoing message goes
+   * through here so the compiler checks it against the protocol.
+   * @param {WebviewToHost} msg
+   */
+  function post(msg) {
+    vscode.postMessage(msg);
+  }
 
   const el = {
     fileName: document.getElementById('file-name'),
     tableList: document.getElementById('table-list'),
     schemaBtn: document.getElementById('schema-btn'),
-    search: document.getElementById('search'),
-    addRow: document.getElementById('add-row'),
-    deleteRow: document.getElementById('delete-row'),
-    copyFormat: document.getElementById('copy-format'),
-    prev: document.getElementById('prev'),
-    next: document.getElementById('next'),
+    search: /** @type {HTMLInputElement} */ (document.getElementById('search')),
+    addRow: /** @type {HTMLButtonElement} */ (document.getElementById('add-row')),
+    deleteRow: /** @type {HTMLButtonElement} */ (document.getElementById('delete-row')),
+    copyFormat: /** @type {HTMLSelectElement} */ (document.getElementById('copy-format')),
+    prev: /** @type {HTMLButtonElement} */ (document.getElementById('prev')),
+    next: /** @type {HTMLButtonElement} */ (document.getElementById('next')),
     pageInfo: document.getElementById('page-info'),
     grid: document.getElementById('grid-container'),
     statusBar: document.getElementById('status-bar'),
@@ -45,42 +48,36 @@
   // ---- Messaging ----
 
   window.addEventListener('message', (event) => {
-    const msg = event.data;
+    const msg = /** @type {HostToWebview} */ (event.data);
     switch (msg.type) {
       case 'init':
         el.fileName.textContent = msg.fileName;
         el.fileName.title = msg.fileName;
-        state.tables = msg.tables;
+        vm.applyInit(msg.tables);
         renderTableList();
-        if (state.tables.length > 0) {
-          selectTable(state.tables[0].name);
+        if (vm.tables.length > 0) {
+          selectTable(vm.tables[0].name);
         } else {
           el.grid.textContent = '';
           el.grid.appendChild(div('empty', 'No tables in this database.'));
         }
         break;
       case 'tableData':
-        if (msg.table === state.currentTable && !state.showingSchema) {
-          state.totalRows = msg.data.totalRows;
-          state.columns = msg.data.columns;
-          state.rows = msg.data.rows;
-          state.rowIds = msg.data.rowIds || null;
-          state.selectedRow = -1;
+        if (vm.receiveTableData(msg.table, msg.data)) {
           renderGrid(msg.data);
           renderPager();
           updateEditButtons();
         }
         break;
-      case 'dataChanged':
-        // An edit, undo, redo, or revert happened (possibly in another
-        // panel). Update sidebar counts and re-query what we display.
-        state.tables = msg.tables;
+      case 'dataChanged': {
+        const requery = vm.receiveDataChanged(msg.tables);
         renderTableList();
         markActiveTable();
-        if (state.currentTable && !state.showingSchema) {
+        if (requery) {
           requestData();
         }
         break;
+      }
       case 'schema':
         renderSchema(msg.entries);
         break;
@@ -91,24 +88,14 @@
   });
 
   function requestData() {
-    vscode.postMessage({
-      type: 'getTableData',
-      request: {
-        table: state.currentTable,
-        page: state.page,
-        pageSize: PAGE_SIZE,
-        sortColumn: state.sortColumn,
-        sortDir: state.sortDir,
-        filter: state.filter,
-      },
-    });
+    post({ type: 'getTableData', request: vm.dataRequest() });
   }
 
   // ---- Sidebar ----
 
   function renderTableList() {
     el.tableList.textContent = '';
-    for (const table of state.tables) {
+    for (const table of vm.tables) {
       const li = document.createElement('li');
       li.dataset.name = table.name;
 
@@ -136,17 +123,14 @@
     for (const li of el.tableList.children) {
       li.classList.toggle(
         'active',
-        !state.showingSchema && li.dataset.name === state.currentTable
+        !vm.showingSchema &&
+          /** @type {HTMLElement} */ (li).dataset.name === vm.currentTable
       );
     }
   }
 
   function selectTable(name) {
-    state.currentTable = name;
-    state.page = 0;
-    state.sortColumn = null;
-    state.sortDir = 'asc';
-    state.showingSchema = false;
+    vm.selectTable(name);
     markActiveTable();
     requestData();
   }
@@ -157,7 +141,7 @@
     el.grid.textContent = '';
     if (data.rows.length === 0) {
       el.grid.appendChild(
-        div('empty', state.filter ? 'No rows match the filter.' : 'Table is empty.')
+        div('empty', vm.filter ? 'No rows match the filter.' : 'Table is empty.')
       );
       updateStatus();
       return;
@@ -171,8 +155,8 @@
     for (const col of data.columns) {
       const th = document.createElement('th');
       th.textContent = col.name + (col.pk ? ' 🔑' : '');
-      if (state.sortColumn === col.name) {
-        th.textContent += state.sortDir === 'asc' ? ' ▲' : ' ▼';
+      if (vm.sortColumn === col.name) {
+        th.textContent += vm.sortDir === 'asc' ? ' ▲' : ' ▼';
       }
       const type = document.createElement('span');
       type.className = 'col-type';
@@ -191,7 +175,7 @@
         const td = document.createElement('td');
         renderCell(td, value);
         td.addEventListener('click', () => selectRow(rowIndex));
-        if (state.rowIds) {
+        if (vm.rowIds) {
           td.addEventListener('dblclick', () =>
             beginCellEdit(td, rowIndex, colIndex)
           );
@@ -217,7 +201,7 @@
   }
 
   function selectRow(rowIndex) {
-    state.selectedRow = rowIndex;
+    vm.selectRow(rowIndex);
     const tbody = el.grid.querySelector('tbody');
     if (tbody) {
       Array.from(tbody.children).forEach((tr, i) => {
@@ -228,13 +212,7 @@
   }
 
   function sortBy(column) {
-    if (state.sortColumn === column) {
-      state.sortDir = state.sortDir === 'asc' ? 'desc' : 'asc';
-    } else {
-      state.sortColumn = column;
-      state.sortDir = 'asc';
-    }
-    state.page = 0;
+    vm.sortBy(column);
     requestData();
   }
 
@@ -244,7 +222,7 @@
     if (td.querySelector('input')) {
       return;
     }
-    const original = state.rows[rowIndex][colIndex];
+    const original = vm.rows[rowIndex][colIndex];
     const input = document.createElement('input');
     input.className = 'cell-editor';
     input.value = original === null ? '' : String(original);
@@ -260,16 +238,13 @@
         return;
       }
       finished = true;
-      if (commit && input.value !== (original === null ? '' : String(original))) {
-        vscode.postMessage({
-          type: 'updateCell',
-          table: state.currentTable,
-          rowid: state.rowIds[rowIndex],
-          column: state.columns[colIndex].name,
-          value: parseEntry(input.value),
-        });
+      const message = commit
+        ? vm.cellEditMessage(rowIndex, colIndex, input.value)
+        : null;
+      if (message) {
+        post(message);
         // The grid refreshes via dataChanged; show the value optimistically.
-        renderCell(td, parseEntry(input.value));
+        renderCell(td, message.value);
       } else {
         renderCell(td, original);
       }
@@ -285,20 +260,15 @@
     input.addEventListener('blur', () => finish(true));
   }
 
-  /** Interpret what the user typed: the literal NULL means SQL NULL. */
-  function parseEntry(text) {
-    return text.toUpperCase() === 'NULL' ? null : text;
-  }
-
   // ---- Insert / delete rows ----
 
   el.addRow.addEventListener('click', () => {
-    if (!state.rowIds && state.rows.length > 0) {
+    if (!vm.rowIds && vm.rows.length > 0) {
       return;
     }
-    el.insertTitle.textContent = 'Insert into ' + state.currentTable;
+    el.insertTitle.textContent = 'Insert into ' + vm.currentTable;
     el.insertFields.textContent = '';
-    for (const col of state.columns) {
+    for (const col of vm.columns) {
       const label = document.createElement('label');
       const caption = document.createElement('span');
       caption.textContent = col.name + (col.type ? ' (' + col.type + ')' : '');
@@ -319,13 +289,11 @@
   el.insertCancel.addEventListener('click', closeInsertForm);
 
   el.insertOk.addEventListener('click', () => {
-    const values = {};
+    const entries = [];
     for (const input of el.insertFields.querySelectorAll('input')) {
-      if (input.value !== '') {
-        values[input.dataset.column] = parseEntry(input.value);
-      }
+      entries.push({ column: input.dataset.column, text: input.value });
     }
-    vscode.postMessage({ type: 'insertRow', table: state.currentTable, values });
+    post(vm.insertMessage(entries));
     closeInsertForm();
   });
 
@@ -342,54 +310,39 @@
   }
 
   el.deleteRow.addEventListener('click', () => {
-    if (state.selectedRow === -1 || !state.rowIds) {
-      return;
+    const message = vm.deleteMessage();
+    if (message) {
+      post(message);
     }
-    vscode.postMessage({
-      type: 'deleteRow',
-      table: state.currentTable,
-      rowid: state.rowIds[state.selectedRow],
-    });
   });
 
   function updateEditButtons() {
-    const editable = !state.showingSchema && !!state.rowIds;
-    const editableTable =
-      !state.showingSchema &&
-      state.tables.some(
-        (t) => t.name === state.currentTable && t.type === 'table'
-      );
-    el.addRow.disabled = !editableTable;
-    el.deleteRow.disabled = !editable || state.selectedRow === -1;
+    const buttons = vm.editButtons();
+    el.addRow.disabled = buttons.addRowDisabled;
+    el.deleteRow.disabled = buttons.deleteRowDisabled;
   }
 
   // ---- Copy / export ----
 
   el.copyFormat.addEventListener('change', () => {
-    const format = el.copyFormat.value;
+    // The option values are exactly the export formats (or the placeholder).
+    const format = /** @type {import('../src/protocol').ExportFormat | ''} */ (
+      el.copyFormat.value
+    );
     el.copyFormat.value = '';
-    if (!format || state.showingSchema || state.rows.length === 0) {
-      return;
+    const message = vm.copyMessage(format);
+    if (message) {
+      post(message);
     }
-    // Copy the selected row if there is one, otherwise the visible page.
-    const rows =
-      state.selectedRow === -1 ? state.rows : [state.rows[state.selectedRow]];
-    vscode.postMessage({
-      type: 'copyRows',
-      format,
-      table: state.currentTable,
-      columns: state.columns.map((c) => c.name),
-      rows,
-    });
   });
 
   // ---- Schema ----
 
   el.schemaBtn.addEventListener('click', () => {
-    state.showingSchema = true;
+    vm.showSchema();
     markActiveTable();
     updateEditButtons();
-    vscode.postMessage({ type: 'getSchema' });
+    post({ type: 'getSchema' });
   });
 
   function renderSchema(entries) {
@@ -407,15 +360,13 @@
   // ---- Paging, filtering, status ----
 
   el.prev.addEventListener('click', () => {
-    if (state.page > 0) {
-      state.page--;
+    if (vm.prevPage()) {
       requestData();
     }
   });
 
   el.next.addEventListener('click', () => {
-    if ((state.page + 1) * PAGE_SIZE < state.totalRows) {
-      state.page++;
+    if (vm.nextPage()) {
       requestData();
     }
   });
@@ -424,29 +375,22 @@
   el.search.addEventListener('input', () => {
     clearTimeout(filterTimer);
     filterTimer = setTimeout(() => {
-      state.filter = el.search.value;
-      state.page = 0;
-      if (state.currentTable && !state.showingSchema) {
+      vm.setFilter(el.search.value);
+      if (vm.currentTable && !vm.showingSchema) {
         requestData();
       }
     }, 250);
   });
 
   function renderPager() {
-    const totalPages = Math.max(1, Math.ceil(state.totalRows / PAGE_SIZE));
-    el.pageInfo.textContent = 'Page ' + (state.page + 1) + ' / ' + totalPages;
-    el.prev.disabled = state.page === 0;
-    el.next.disabled = state.page + 1 >= totalPages;
+    const pager = vm.pager();
+    el.pageInfo.textContent = pager.label;
+    el.prev.disabled = pager.prevDisabled;
+    el.next.disabled = pager.nextDisabled;
   }
 
   function updateStatus() {
-    const first = state.totalRows === 0 ? 0 : state.page * PAGE_SIZE + 1;
-    const last = Math.min((state.page + 1) * PAGE_SIZE, state.totalRows);
-    setStatus(
-      state.currentTable + ': rows ' + first + '–' + last + ' of ' + state.totalRows +
-        (state.filter ? ' (filtered)' : '') +
-        (state.rowIds ? '' : ' (read-only)')
-    );
+    setStatus(vm.statusText());
   }
 
   function setStatus(text, isError) {
@@ -461,5 +405,5 @@
     return d;
   }
 
-  vscode.postMessage({ type: 'ready' });
+  post({ type: 'ready' });
 })();

@@ -1,16 +1,11 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { SqliteDriver, TableDataRequest } from './driver';
+import { SqliteDriver } from './driver';
 import { NodeSqliteDriver } from './drivers/nodeSqlite';
 import { SqlJsDriver } from './drivers/sqljs';
-import {
-  deserializeOps,
-  EditOp,
-  EditSession,
-  serializeOps,
-  SqlValue,
-} from './edits';
-import { ExportFormat, formatRows } from './export';
+import { deserializeOps, EditOp, EditSession, serializeOps } from './edits';
+import { handleWebviewMessage, MessageDeps } from './messages';
+import { HostToWebview, WebviewToHost } from './protocol';
 
 class SqliteDocument implements vscode.CustomDocument {
   readonly session: EditSession;
@@ -95,87 +90,31 @@ export class SqliteEditorProvider
     };
     webview.html = this.getHtml(webview);
 
-    webview.onDidReceiveMessage(async (message) => {
+    const deps: MessageDeps = {
+      fileName: path.basename(document.uri.fsPath),
+      db: document.db,
+      session: document.session,
+      post: (msg) => {
+        webview.postMessage(msg);
+      },
+      onEdit: (op, label) => this.pushEdit(document, op, label),
+      onCopy: async (text, format, rowCount) => {
+        await vscode.env.clipboard.writeText(text);
+        vscode.window.showInformationMessage(
+          `Copied ${rowCount} row(s) as ${format.toUpperCase()}`
+        );
+      },
+    };
+    webview.onDidReceiveMessage(async (message: WebviewToHost) => {
       try {
-        await this.handleMessage(document, webview, message);
+        await handleWebviewMessage(deps, message);
       } catch (err) {
-        webview.postMessage({
+        deps.post({
           type: 'error',
           message: err instanceof Error ? err.message : String(err),
         });
       }
     });
-  }
-
-  private async handleMessage(
-    document: SqliteDocument,
-    webview: vscode.Webview,
-    message: { type: string } & Record<string, unknown>
-  ): Promise<void> {
-    switch (message.type) {
-      case 'ready':
-        webview.postMessage({
-          type: 'init',
-          fileName: path.basename(document.uri.fsPath),
-          tables: document.db.listTables(),
-        });
-        break;
-      case 'getTableData': {
-        const req = message.request as TableDataRequest;
-        webview.postMessage({
-          type: 'tableData',
-          table: req.table,
-          data: document.db.getTableData(req),
-        });
-        break;
-      }
-      case 'getSchema':
-        webview.postMessage({
-          type: 'schema',
-          entries: document.db.getSchema(),
-        });
-        break;
-      case 'updateCell': {
-        const op = document.session.updateCell(
-          message.table as string,
-          message.rowid as number,
-          message.column as string,
-          message.value as SqlValue
-        );
-        this.pushEdit(document, op, `Edit ${op.column}`);
-        break;
-      }
-      case 'insertRow': {
-        const op = document.session.insertRow(
-          message.table as string,
-          message.values as Record<string, SqlValue>
-        );
-        this.pushEdit(document, op, 'Insert row');
-        break;
-      }
-      case 'deleteRow': {
-        const op = document.session.deleteRow(
-          message.table as string,
-          message.rowid as number
-        );
-        this.pushEdit(document, op, 'Delete row');
-        break;
-      }
-      case 'copyRows': {
-        const format = message.format as ExportFormat;
-        const text = formatRows(
-          format,
-          message.columns as string[],
-          message.rows as unknown[][],
-          { table: message.table as string }
-        );
-        await vscode.env.clipboard.writeText(text);
-        vscode.window.showInformationMessage(
-          `Copied ${(message.rows as unknown[]).length} row(s) as ${format.toUpperCase()}`
-        );
-        break;
-      }
-    }
   }
 
   private pushEdit(document: SqliteDocument, op: EditOp, label: string): void {
@@ -196,9 +135,12 @@ export class SqliteEditorProvider
 
   /** Tell every panel showing this document to re-query what it displays. */
   private refresh(document: SqliteDocument): void {
-    const tables = document.db.listTables();
+    const msg: HostToWebview = {
+      type: 'dataChanged',
+      tables: document.db.listTables(),
+    };
     for (const panel of this.panels.get(document) ?? []) {
-      panel.webview.postMessage({ type: 'dataChanged', tables });
+      panel.webview.postMessage(msg);
     }
   }
 
@@ -258,6 +200,9 @@ export class SqliteEditorProvider
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js')
     );
+    const viewModelUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'media', 'viewModel.js')
+    );
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css')
     );
@@ -314,6 +259,7 @@ export class SqliteEditorProvider
       </div>
     </div>
   </div>
+  <script nonce="${nonce}" src="${viewModelUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

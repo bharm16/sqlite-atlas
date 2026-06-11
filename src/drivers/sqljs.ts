@@ -11,6 +11,7 @@ import {
   quoteIdent,
   toDisplayValue,
 } from '../driver';
+import { composeTableQuery } from '../query';
 
 let sqlJsPromise: Promise<SqlJsStatic> | undefined;
 
@@ -72,31 +73,15 @@ export class SqlJsDriver implements SqliteDriver {
       return { columns: [], rows: [], totalRows: 0 };
     }
 
-    const params: string[] = [];
-    let where = '';
-    if (req.filter) {
-      const clauses = columns.map((c) => `CAST(${quoteIdent(c.name)} AS TEXT) LIKE ?`);
-      where = ` WHERE ${clauses.join(' OR ')}`;
-      const pattern = `%${req.filter}%`;
-      params.push(...columns.map(() => pattern));
-    }
-
-    let orderBy = '';
-    if (req.sortColumn && columns.some((c) => c.name === req.sortColumn)) {
-      orderBy = ` ORDER BY ${quoteIdent(req.sortColumn)} ${req.sortDir === 'desc' ? 'DESC' : 'ASC'}`;
-    }
-
-    const base = `FROM ${quoteIdent(req.table)}${where}`;
-    const totalRows = this.scalar(`SELECT COUNT(*) ${base}`, params);
-    const tail = `${base}${orderBy} LIMIT ? OFFSET ?`;
-    const bindings = [...params, req.pageSize, req.page * req.pageSize];
+    const query = composeTableQuery(req, columns);
+    const totalRows = this.scalar(query.count.sql, query.count.params);
 
     // Views and WITHOUT ROWID tables have no rowid; fall back to plain rows.
     try {
-      const { rows, rowIds } = this.fetchRows(`SELECT rowid AS __rid_, * ${tail}`, bindings, true);
+      const { rows, rowIds } = this.fetchRows(query.rows.sql, query.rows.params, true);
       return { columns, rows, totalRows, rowIds };
     } catch {
-      const { rows } = this.fetchRows(`SELECT * ${tail}`, bindings, false);
+      const { rows } = this.fetchRows(query.rowsNoRowid.sql, query.rowsNoRowid.params, false);
       return { columns, rows, totalRows };
     }
   }

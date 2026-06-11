@@ -9,6 +9,7 @@ import {
   quoteIdent,
   toDisplayValue,
 } from '../driver';
+import { composeTableQuery } from '../query';
 
 // node:sqlite ships with the extension host's Node on recent VS Code builds;
 // older hosts (and VS Code for Web) fall back to the sql.js driver.
@@ -72,35 +73,18 @@ export class NodeSqliteDriver implements SqliteDriver {
       return { columns: [], rows: [], totalRows: 0 };
     }
 
-    const params: string[] = [];
-    let where = '';
-    if (req.filter) {
-      const clauses = columns.map((c) => `CAST(${quoteIdent(c.name)} AS TEXT) LIKE ?`);
-      where = ` WHERE ${clauses.join(' OR ')}`;
-      const pattern = `%${req.filter}%`;
-      params.push(...columns.map(() => pattern));
-    }
-
-    let orderBy = '';
-    if (req.sortColumn && columns.some((c) => c.name === req.sortColumn)) {
-      orderBy = ` ORDER BY ${quoteIdent(req.sortColumn)} ${req.sortDir === 'desc' ? 'DESC' : 'ASC'}`;
-    }
-
-    const base = `FROM ${quoteIdent(req.table)}${where}`;
+    const query = composeTableQuery(req, columns);
     const totalRows = Number(
-      (this.db.prepare(`SELECT COUNT(*) AS n ${base}`).get(...(params as never[])) as { n: number }).n
+      (this.db
+        .prepare(query.count.sql)
+        .get(...(query.count.params as never[])) as { n: number }).n
     );
 
-    // Select columns explicitly so result keys are unambiguous, with rowid
-    // first for editing. Views and WITHOUT ROWID tables have no rowid.
-    const colList = columns.map((c) => quoteIdent(c.name)).join(', ');
-    const tail = `${base}${orderBy} LIMIT ? OFFSET ?`;
-    const bindings = [...params, req.pageSize, req.page * req.pageSize] as never[];
-
+    // Views and WITHOUT ROWID tables have no rowid; fall back to plain rows.
     try {
       const raw = this.db
-        .prepare(`SELECT rowid AS __rid_, ${colList} ${tail}`)
-        .all(...bindings) as Record<string, unknown>[];
+        .prepare(query.rows.sql)
+        .all(...(query.rows.params as never[])) as Record<string, unknown>[];
       return {
         columns,
         totalRows,
@@ -109,8 +93,8 @@ export class NodeSqliteDriver implements SqliteDriver {
       };
     } catch {
       const raw = this.db
-        .prepare(`SELECT ${colList} ${tail}`)
-        .all(...bindings) as Record<string, unknown>[];
+        .prepare(query.rowsNoRowid.sql)
+        .all(...(query.rowsNoRowid.params as never[])) as Record<string, unknown>[];
       return {
         columns,
         totalRows,

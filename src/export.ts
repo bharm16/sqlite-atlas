@@ -1,3 +1,5 @@
+import { quoteIdent } from './driver';
+
 export type ExportFormat = 'csv' | 'tsv' | 'json' | 'sql' | 'markdown' | 'html';
 
 export interface ExportOptions {
@@ -57,10 +59,6 @@ export function formatRows(
     default:
       throw new Error(`Unknown export format: ${format}`);
   }
-}
-
-function quoteIdent(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
 }
 
 function mdCell(value: unknown): string {
